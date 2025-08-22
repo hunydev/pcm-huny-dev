@@ -8,7 +8,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // - 카드 클릭 시: 전체 길이 디코드 + 재생, 재생 SR 슬라이더(realSR)로 playbackRate 조절
 // - (선택) WAV 다운로드: 선택 가정/설정으로 RIFF 헤더 씌워 16-bit PCM 저장
 
-function App() {
+export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [arrayBuffer, setArrayBuffer] = useState<ArrayBuffer | null>(null);
 

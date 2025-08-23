@@ -420,40 +420,19 @@ function errMsg(e: any): string {
 async function getFFmpeg(ref: React.MutableRefObject<any|null>) {
   if (ref.current) return ref.current;
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+  const ff = new FFmpeg();
   const { toBlobURL } = await import("@ffmpeg/util");
-  const bases = [
-    "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd",
-    "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd",
-    "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm",
-    "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm",
-  ];
-  const errs: string[] = [];
-  for (const base of bases) {
-    // 1) 시도: 워커 포함
-    try {
-      const ffTry = new FFmpeg();
-      await ffTry.load({
-        coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
-        workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, "text/javascript"),
-      });
-      ref.current = ffTry; return ffTry;
-    } catch (e1) {
-      errs.push(`${base} (worker): ${errMsg(e1)}`);
-      // 2) 폴백: 워커 없이
-      try {
-        const ffTry2 = new FFmpeg();
-        await ffTry2.load({
-          coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
-          wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
-        });
-        ref.current = ffTry2; return ffTry2;
-      } catch (e2) {
-        errs.push(`${base} (no-worker): ${errMsg(e2)}`);
-      }
-    }
+  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  try {
+    await ff.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    });
+  } catch (e) {
+    throw new Error("FFmpeg 로드 실패: " + errMsg(e));
   }
-  throw new Error("FFmpeg 로드 실패: " + errs.join(" | "));
+  ref.current = ff;
+  return ff;
 }
 
 async function decodeWithFFmpeg(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2}, opts?: {sr?: number, ref?: React.MutableRefObject<any|null>}){

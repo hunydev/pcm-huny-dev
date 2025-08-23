@@ -8,6 +8,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // - 카드 클릭 시: 전체 길이 디코드 + 재생, 재생 SR 슬라이더(realSR)로 playbackRate 조절
 // - (선택) WAV 다운로드: 선택 가정/설정으로 RIFF 헤더 씌워 16-bit PCM 저장
 
+// 전역 타입 정의(컴포넌트 밖으로 이동하여 유틸 함수에서도 사용 가능)
+type Fmt = "8u"|"16le"|"16be"|"24le"|"24be"|"32le"|"32f"|"mulaw"|"alaw";
+type Cand = { id: string; fmt: Fmt; ch: 1|2; label: string; bytesPerSample: number };
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [arrayBuffer, setArrayBuffer] = useState<ArrayBuffer | null>(null);
@@ -21,9 +25,6 @@ export default function App() {
   const [limitCandidates, setLimitCandidates] = useState<number>(999); // 필요시 제한
 
   // 후보 포맷(최소 필수 세트)
-  type Fmt = "8u"|"16le"|"16be"|"24le"|"24be"|"32le"|"32f"|"mulaw"|"alaw";
-  type Cand = { id: string; fmt: Fmt; ch: 1|2; label: string; bytesPerSample: number };
-
   const candidates: Cand[] = useMemo(() => {
     const fmts: {fmt:Fmt, bps:number, name:string}[] = [
       {fmt:"16le", bps:2, name:"16LE"},
@@ -173,7 +174,11 @@ export default function App() {
     const ctx = audioCtxRef.current;
     const assumed = assumedSR; // 버퍼 생성 SR (가정)
     const buf = ctx.createBuffer(modal.cand.ch, modal.fullCh[0].length, assumed);
-    for (let i=0;i<modal.cand.ch;i++) buf.copyToChannel(modal.fullCh[i], i);
+    for (let i=0; i<modal.cand.ch; i++) {
+      // TS 5.x TypedArray generics 불일치 회피: copyToChannel 대신 set 사용
+      const dest = buf.getChannelData(i);
+      dest.set(modal.fullCh[i]);
+    }
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.playbackRate.value = modal.realSR / assumed; // SR 조절 → 재생속도 변경
@@ -424,7 +429,7 @@ function isScaleWeird(x: Float32Array){
   return std < 1e-4 || std > 5; // 경험적 범위
 }
 
-function decodeRawToFloat32(buf: ArrayBuffer, cand: {fmt: any, ch: 1|2, bytesPerSample: number}, previewFrames?: number): Float32Array[] {
+function decodeRawToFloat32(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2, bytesPerSample: number}, previewFrames?: number): Float32Array[] {
   const dv = new DataView(buf);
   const bps = cand.bytesPerSample;
   const channels = cand.ch;
@@ -437,7 +442,7 @@ function decodeRawToFloat32(buf: ArrayBuffer, cand: {fmt: any, ch: 1|2, bytesPer
   const out: Float32Array[] = new Array(channels).fill(null).map(()=> new Float32Array(totalFrames));
 
   // 픽셀 단위로 순회(프레임 단위)
-  const fmt = cand.fmt as Fmt;
+  const fmt = cand.fmt;
   let offset = 0;
 
   if (fmt === "8u") {

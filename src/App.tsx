@@ -174,7 +174,7 @@ export default function App() {
     try {
       fullCh = await decodeFull(arrayBuffer, cand);
     } catch (e) {
-      alert("전체 디코드 실패: " + (e as any)?.message);
+      alert("전체 디코드 실패: " + errMsg(e));
       return;
     }
     setModal({ cand, realSR: assumedSR, fullCh, playing: false });
@@ -412,17 +412,25 @@ function WaveCanvas({samples, height=120}:{samples: Float32Array, height?: numbe
 }
 
 // ====== DSP/디코드 유틸 ======
+function errMsg(e: any): string {
+  if (!e) return "unknown";
+  if (e instanceof Error) return e.message || "unknown";
+  try { return typeof e === "string" ? e : JSON.stringify(e); } catch { return String(e); }
+}
 async function getFFmpeg(ref: React.MutableRefObject<any|null>) {
   if (ref.current) return ref.current;
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const ff = new FFmpeg();
   const { toBlobURL } = await import("@ffmpeg/util");
-  const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd";
-  await ff.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-    workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, "text/javascript"),
-  });
+  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  try {
+    await ff.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    });
+  } catch (e) {
+    throw new Error("FFmpeg 로드 실패: " + errMsg(e));
+  }
   ref.current = ff;
   return ff;
 }
@@ -431,6 +439,10 @@ async function decodeWithFFmpeg(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2}, opt
   const sr = opts?.sr ?? 8000;
   const ref = opts?.ref!;
   const ff = await getFFmpeg(ref);
+  // 로그 캡처(최근 메시지)
+  const logs: string[] = [];
+  const logHandler = (e: any) => { if (e?.message) logs.push(e.message); };
+  try { (ff as any).on?.("log", logHandler); } catch {}
   const inName = cand.fmt === "vox" ? "in.vox" : "in.g726";
   const outName = "out.pcm";
   // 입력 파일 기록
@@ -442,8 +454,11 @@ async function decodeWithFFmpeg(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2}, opt
     tries.push(["-f", "vox", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
     tries.push(["-f", "adpcm_ima_oki", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
   } else {
-    // g721 (g726 32kbps 가정)
+    // g721 (g726 32kbps 가정) — 다양한 힌트 조합 시도
     tries.push(["-f", "g726", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-f", "g726", "-bits_per_coded_sample", "4", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-f", "g726", "-b:a", "32k", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-f", "g726", "-bit_rate", "32000", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
     tries.push(["-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
   }
   let ok = false; let lastErr: any = null;
@@ -453,9 +468,12 @@ async function decodeWithFFmpeg(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2}, opt
       ok = true; break;
     } catch (e) { lastErr = e; }
   }
-  if (!ok) throw new Error("FFmpeg 디코드 실패: " + (lastErr?.message || "unknown"));
+  if (!ok) throw new Error("FFmpeg 디코드 실패: " + errMsg(lastErr) + (logs.length? "\n"+logs.slice(-20).join("\n"): ""));
   const raw = await ff.readFile(outName);
   const pcm = raw as Uint8Array;
+  if (!pcm || pcm.byteLength === 0) {
+    throw new Error("FFmpeg 디코드 결과가 비었습니다." + (logs.length? "\n"+logs.slice(-20).join("\n"): ""));
+  }
   // s16le -> float32 (mono/ stereo interleaved X, cand.ch 별 배열 생성)
   const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
   const totalFrames = view.byteLength / 2 / cand.ch | 0;

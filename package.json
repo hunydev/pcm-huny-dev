@@ -4,10 +4,11 @@
   "private": true,
   "homepage": ".",
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/ffmpeg": "0.12.6",
-    "@ffmpeg/util": "0.12.1"
+    "@ffmpeg/util": "0.12.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

@@ -8,3 +8,9 @@ declare module "*.svg" {
 // Ambient declarations to avoid TS errors until packages are installed
 declare module '@ffmpeg/ffmpeg';
 declare module '@ffmpeg/util';
+
+// Vite raw asset URLs (e.g., '?url')
+declare module '*?url' {
+  const url: string;
+  export default url;
+}

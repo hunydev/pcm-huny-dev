@@ -421,12 +421,11 @@ async function getFFmpeg(ref: React.MutableRefObject<any|null>) {
   if (ref.current) return ref.current;
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const ff = new FFmpeg();
-  const { toBlobURL } = await import("@ffmpeg/util");
-  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
   try {
+    const base = `${import.meta.env.BASE_URL}ffmpeg`;
     await ff.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      coreURL: `${base}/ffmpeg-core.js`,
+      wasmURL: `${base}/ffmpeg-core.wasm`,
     });
   } catch (e) {
     throw new Error("FFmpeg 로드 실패: " + errMsg(e));

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
+import logoUrl from "./assets/logo.svg";
+
 // 단일 파일 React 컴포넌트
 // - .raw/.pcm 업로드
 // - 여러 포맷 가정(코덱/엔디안/채널)으로 디코드
@@ -207,6 +209,7 @@ export default function App() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <header className="sticky top-0 z-10 backdrop-blur bg-neutral-950/70 border-b border-neutral-800">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+          <img src={logoUrl} alt="RAW PCM Explorer" className="w-6 h-6" />
           <div className="text-xl font-semibold">RAW PCM 파형 탐색기</div>
           <div className="ml-auto flex items-center gap-3">
             <input

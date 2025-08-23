@@ -11,7 +11,7 @@ import logoUrl from "./assets/logo.svg";
 // - (선택) WAV 다운로드: 선택 가정/설정으로 RIFF 헤더 씌워 16-bit PCM 저장
 
 // 전역 타입 정의(컴포넌트 밖으로 이동하여 유틸 함수에서도 사용 가능)
-type Fmt = "8u"|"16le"|"16be"|"24le"|"24be"|"32le"|"32f"|"mulaw"|"alaw";
+type Fmt = "8u"|"16le"|"16be"|"24le"|"24be"|"32le"|"32f"|"mulaw"|"alaw"|"vox"|"g721";
 type Cand = { id: string; fmt: Fmt; ch: 1|2; label: string; bytesPerSample: number };
 
 export default function App() {
@@ -25,6 +25,7 @@ export default function App() {
   const [enableClipFilter, setEnableClipFilter] = useState(true);
   const [enableScaleFilter, setEnableScaleFilter] = useState(true);
   const [limitCandidates, setLimitCandidates] = useState<number>(999); // 필요시 제한
+  const ffmpegRef = useRef<any|null>(null);
 
   // 후보 포맷(최소 필수 세트)
   const candidates: Cand[] = useMemo(() => {
@@ -52,6 +53,10 @@ export default function App() {
         });
       }
     }
+    // FFmpeg 필요 인코딩 후보(프리뷰 자동 디코드 제외, 버튼으로 디코드)
+    // VOX(OKI ADPCM), G.721(G.726 32k) — 일반적으로 mono
+    list.push({ id: `vox-1ch`, fmt: "vox", ch: 1, label: `VOX(OKI ADPCM) • 1ch`, bytesPerSample: 1 });
+    list.push({ id: `g721-1ch`, fmt: "g721", ch: 1, label: `G.721 ADPCM • 1ch`, bytesPerSample: 1 });
     return list;
   }, []);
 
@@ -60,9 +65,9 @@ export default function App() {
     const f = e.target.files?.[0];
     if (!f) return;
     // 확장자 제한(.pcm, .raw)
-    const ok = /\.(pcm|raw)$/i.test(f.name);
+    const ok = /\.(pcm|raw|vox|g721|g726|adpcm)$/i.test(f.name);
     if (!ok) {
-      alert(".pcm 또는 .raw 파일만 업로드 가능합니다.");
+      alert(".pcm/.raw/.vox/.g721/.g726/.adpcm 파일만 업로드 가능합니다.");
       e.target.value = "";
       return;
     }
@@ -75,6 +80,10 @@ export default function App() {
   function decodePreview(buf: ArrayBuffer, cand: Cand, previewFrames: number) {
     // 반환: { chData: Float32Array[], hiddenReason?: string }
     try {
+      // FFmpeg 필요 포맷은 프리뷰 자동 디코드 생략(버튼으로 수행)
+      if (cand.fmt === "vox" || cand.fmt === "g721") {
+        return { chData: [], hiddenReason: "FFmpeg 필요(버튼으로 디코드)" };
+      }
       const chData = decodeRawToFloat32(buf, cand, previewFrames);
       const mono = downmixMono(chData);
       // 필터 적용(불리언 컷)
@@ -88,7 +97,11 @@ export default function App() {
     }
   }
 
-  function decodeFull(buf: ArrayBuffer, cand: Cand) {
+  async function decodeFull(buf: ArrayBuffer, cand: Cand) {
+    if (cand.fmt === "vox" || cand.fmt === "g721") {
+      const out = await decodeWithFFmpeg(buf, cand, { sr: assumedSR, ref: ffmpegRef });
+      return out;
+    }
     return decodeRawToFloat32(buf, cand, undefined); // 전체 길이
   }
 
@@ -145,13 +158,21 @@ export default function App() {
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  // FFmpeg 디코드 트리거 핸들러
+  const onTryFFmpegDecode = useFFmpegButton({
+    arrayBuffer,
+    assumedSR,
+    previewSeconds,
+    setCards,
+    ffmpegRef,
+  });
 
   async function openModal(cand: Cand) {
     if (!arrayBuffer) return;
     // 전체 길이 디코드
     let fullCh: Float32Array[] | undefined = undefined;
     try {
-      fullCh = decodeFull(arrayBuffer, cand);
+      fullCh = await decodeFull(arrayBuffer, cand);
     } catch (e) {
       alert("전체 디코드 실패: " + (e as any)?.message);
       return;
@@ -214,7 +235,7 @@ export default function App() {
           <div className="ml-auto flex items-center gap-3">
             <input
               type="file"
-              accept=".pcm,.raw"
+              accept=".pcm,.raw,.vox,.g721,.g726,.adpcm"
               onChange={onFileChange}
               className="file:mr-4 file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-neutral-100 hover:file:bg-neutral-700"
             />
@@ -242,7 +263,14 @@ export default function App() {
         </section>
 
         {file ? (
-          <div className="mb-4 text-sm text-neutral-400">파일: <span className="text-neutral-200">{file.name}</span> • {bytesFmt(file.size)}</div>
+          <div className="mb-4 text-sm text-neutral-400 flex items-center gap-3 flex-wrap">
+            <span>파일: <span className="text-neutral-200">{file.name}</span> • {bytesFmt(file.size)}</span>
+            <button
+              className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs"
+              onClick={onTryFFmpegDecode}
+              title="VOX, G.721 같은 인코딩된 RAW를 FFmpeg로 디코드하여 후보에 추가"
+            >FFmpeg 디코드(VOX/G.721)</button>
+          </div>
         ) : (
           <div className="mb-4 text-sm text-neutral-400">.pcm / .raw 파일을 업로드하세요</div>
         )}
@@ -384,6 +412,64 @@ function WaveCanvas({samples, height=120}:{samples: Float32Array, height?: numbe
 }
 
 // ====== DSP/디코드 유틸 ======
+async function getFFmpeg(ref: React.MutableRefObject<any|null>) {
+  if (ref.current) return ref.current;
+  const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+  const ff = new FFmpeg();
+  const { toBlobURL } = await import("@ffmpeg/util");
+  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  await ff.load({
+    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, "text/javascript"),
+  });
+  ref.current = ff;
+  return ff;
+}
+
+async function decodeWithFFmpeg(buf: ArrayBuffer, cand: {fmt: Fmt, ch: 1|2}, opts?: {sr?: number, ref?: React.MutableRefObject<any|null>}){
+  const sr = opts?.sr ?? 8000;
+  const ref = opts?.ref!;
+  const ff = await getFFmpeg(ref);
+  const inName = cand.fmt === "vox" ? "in.vox" : "in.g726";
+  const outName = "out.pcm";
+  // 입력 파일 기록
+  await ff.writeFile(inName, new Uint8Array(buf));
+  // 시도할 명령 리스트
+  const tries: string[][] = [];
+  if (cand.fmt === "vox") {
+    tries.push(["-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-f", "vox", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-f", "adpcm_ima_oki", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+  } else {
+    // g721 (g726 32kbps 가정)
+    tries.push(["-f", "g726", "-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+    tries.push(["-ar", String(sr), "-ac", String(cand.ch), "-i", inName, "-f", "s16le", "-ac", String(cand.ch), "-ar", String(sr), outName]);
+  }
+  let ok = false; let lastErr: any = null;
+  for (const args of tries) {
+    try {
+      await ff.exec(args);
+      ok = true; break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!ok) throw new Error("FFmpeg 디코드 실패: " + (lastErr?.message || "unknown"));
+  const raw = await ff.readFile(outName);
+  const pcm = raw as Uint8Array;
+  // s16le -> float32 (mono/ stereo interleaved X, cand.ch 별 배열 생성)
+  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const totalFrames = view.byteLength / 2 / cand.ch | 0;
+  const out: Float32Array[] = new Array(cand.ch).fill(null).map(()=> new Float32Array(totalFrames));
+  let p = 0;
+  for (let i=0;i<totalFrames;i++){
+    for (let ch=0; ch<cand.ch; ch++){
+      const s = view.getInt16(p, true); p+=2;
+      out[ch][i] = Math.max(-1, Math.min(1, s/32768));
+    }
+  }
+  // 정리(필요시): await ff.deleteFile(inName); await ff.deleteFile(outName);
+  return out;
+}
 function downmixMono(chs: Float32Array[]): Float32Array {
   if (!chs || chs.length===0) return new Float32Array();
   if (chs.length===1) return chs[0];
@@ -612,4 +698,43 @@ function bytesFmt(n: number){
   if (n<1024*1024) return `${(n/1024).toFixed(1)} KB`;
   if (n<1024*1024*1024) return `${(n/1024/1024).toFixed(1)} MB`;
   return `${(n/1024/1024/1024).toFixed(1)} GB`;
+}
+
+// ====== FFmpeg 트리거 훅 ======
+// 파일 정보 영역의 버튼에서 호출되어 VOX/G.721을 시도, 성공 시 카드에 추가
+function useFFmpegButton(
+  params: {
+    arrayBuffer: ArrayBuffer|null,
+    assumedSR: number,
+    previewSeconds: number,
+    setCards: React.Dispatch<React.SetStateAction<{cand: Cand; chData: Float32Array[]; hiddenReason?: string}[]>>,
+    ffmpegRef: React.MutableRefObject<any|null>
+  }
+){
+  const { arrayBuffer, assumedSR, previewSeconds, setCards, ffmpegRef } = params;
+  return async function onTryFFmpegDecode(){
+    if (!arrayBuffer) return;
+    const encCands: Cand[] = [
+      { id: `vox-1ch`, fmt: "vox", ch: 1, label: `VOX(OKI ADPCM) • 1ch`, bytesPerSample: 1 },
+      { id: `g721-1ch`, fmt: "g721", ch: 1, label: `G.721 ADPCM • 1ch`, bytesPerSample: 1 },
+    ];
+    const added: {cand: Cand; chData: Float32Array[]; hiddenReason?: string}[] = [];
+    for (const cand of encCands){
+      try {
+        const full = await decodeWithFFmpeg(arrayBuffer, cand, { sr: assumedSR, ref: ffmpegRef });
+        const want = Math.floor(assumedSR * previewSeconds);
+        const chPrev = full.map(ch=> ch.length>want ? ch.slice(0,want) : ch);
+        added.push({ cand, chData: chPrev });
+      } catch {}
+    }
+    if (added.length){
+      setCards(prev => {
+        const ids = new Set(added.map(a=>a.cand.id));
+        const rest = prev.filter(c => !ids.has(c.cand.id));
+        return [...rest, ...added];
+      });
+    } else {
+      alert("FFmpeg 디코드 실패(VOX/G.721). 샘플레이트/채널 가정값을 조정해보세요.");
+    }
+  }
 }

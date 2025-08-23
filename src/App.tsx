@@ -417,7 +417,7 @@ async function getFFmpeg(ref: React.MutableRefObject<any|null>) {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const ff = new FFmpeg();
   const { toBlobURL } = await import("@ffmpeg/util");
-  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd";
   await ff.load({
     coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
     wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
